@@ -11,6 +11,9 @@ except Exception:  # pragma: no cover
     text = None
 
 from backend.app.planners.itinerary_optimizer import ItineraryOptimizer
+from backend.app.services.budget_planner import BudgetPlanner
+from backend.app.services.hotel_area_service import HotelAreaService
+from backend.app.services.meal_planner import MealPlanner
 
 
 class FormalItineraryService:
@@ -35,8 +38,29 @@ class FormalItineraryService:
         if not pois:
             raise RuntimeError("No POI data available. Please seed pois table or provide data/processed/chongqing_pois_enriched.csv")
 
+        budget_plan = BudgetPlanner().create_budget_plan(user_request.get("budget"), user_request.get("days", 1), user_request.get("travel_style", "standard"))
+        user_request["budget_plan"] = budget_plan
         optimizer = ItineraryOptimizer(pois)
-        return optimizer.generate(user_request=user_request, weather=weather)
+        payload = optimizer.generate(user_request=user_request, weather=weather)
+        route_areas = [day.get("main_area") for plan in payload.get("plans", []) for day in plan.get("days", []) if day.get("main_area")]
+        hotel_area = None
+        if user_request.get("need_hotel_area", True):
+            hotel_area = HotelAreaService(self.db).recommend_hotel_area(user_request.get("destination", "重庆"), user_request, route_areas)
+        if user_request.get("need_meal_planning", True):
+            meal_planner = MealPlanner(self.db)
+            for plan in payload.get("plans", []):
+                for day in plan.get("days", []):
+                    meal_planner.insert_meal_slots(day, user_request, budget_plan)
+                totals = self._summarize_plan_with_meals(plan.get("days", []))
+                plan.update(totals)
+                plan["budget_summary"] = BudgetPlanner().check_plan_budget(plan, budget_plan)
+                plan["budget_warnings"] = BudgetPlanner().generate_budget_warnings(plan, budget_plan)
+                plan["recommended_hotel_area"] = hotel_area
+        payload["budget_plan"] = budget_plan
+        payload["budget_summary"] = {"note": "预算约束估算，不承诺实时预订价格。", "total_budget": budget_plan.get("total_budget")}
+        payload["budget_warnings"] = budget_plan.get("budget_warning")
+        payload["recommended_hotel_area"] = hotel_area
+        return payload
 
     @staticmethod
     def _request_to_dict(request: Any) -> Dict[str, Any]:
@@ -71,6 +95,26 @@ class FormalItineraryService:
             "transport_preference": data.get("transport_preference") or "public_transport",
             "need_weather_adjustment": data.get("need_weather_adjustment", False),
             "has_imported_note": data.get("has_imported_note", False),
+            "session_id": data.get("session_id"),
+            "need_meal_planning": data.get("need_meal_planning", True),
+            "need_hotel_area": data.get("need_hotel_area", True),
+            "budget_control_level": data.get("budget_control_level") or data.get("budget_control") or "normal",
+            "removed_pois": data.get("removed_pois") or [],
+            "confirmed_pois": data.get("confirmed_pois") or data.get("imported_pois") or [],
+            "weather_mode": data.get("weather_mode") or "normal",
+            "current_location": data.get("current_location"),
+            "compress_day_index": data.get("compress_day_index"),
+            "selected_day_index": data.get("selected_day_index") or 1,
+        }
+
+    @staticmethod
+    def _summarize_plan_with_meals(days: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return {
+            "total_estimated_cost_low": sum(int(d.get("estimated_cost_low") or 0) for d in days),
+            "total_estimated_cost_high": sum(int(d.get("estimated_cost_high") or 0) for d in days),
+            "total_transport_distance_km": round(sum(float(d.get("transport_distance_km") or 0) for d in days), 2),
+            "total_walking_distance_km": round(sum(float(d.get("walking_distance_km") or 0) for d in days), 2),
+            "total_transport_time_minutes": sum(int(d.get("transport_time_minutes") or 0) for d in days),
         }
 
     def _load_pois(self, city: str = "重庆") -> List[Dict[str, Any]]:

@@ -32,6 +32,8 @@ class ItineraryOptimizer:
         days = max(1, min(int(user_request.get("days") or 1), 7))
         destination = user_request.get("destination") or user_request.get("city") or "重庆"
 
+        self._active_removed_pois = set(user_request.get("removed_pois") or [])
+        self._active_confirmed_pois = set(user_request.get("confirmed_pois") or [])
         plans = []
         for profile in PLAN_PROFILES:
             plan = self._generate_plan(profile, user_request, days, weather)
@@ -53,6 +55,8 @@ class ItineraryOptimizer:
         travel_style = str(user_request.get("travel_style") or "standard")
         base_items = TRAVEL_STYLE_BASE_ITEMS.get(travel_style, 5)
         daily_limit = max(3, min(base_items + profile.daily_item_delta, 7))
+        if user_request.get("walking_tolerance") == "low" or profile.plan_type == "少走路轻松方案":
+            daily_limit = max(3, daily_limit - 1)
 
         area_order = self._rank_areas(profile, user_request, weather)
         used_poi_names: set[str] = set()
@@ -86,7 +90,12 @@ class ItineraryOptimizer:
             for item in sorted_items:
                 used_poi_names.add(str(item.get("poi_name")))
 
-            daily_routes.append(self._build_day_route(day_index, main_area, sorted_items, user_request))
+            day_route = self._build_day_route(day_index, main_area, sorted_items, user_request)
+            if user_request.get("compress_day_index") == day_index:
+                day_route = self._compress_day_route(day_route)
+            if user_request.get("current_location") and day_index == int(user_request.get("selected_day_index") or 1):
+                day_route = self._apply_current_location(day_route, user_request.get("current_location") or {})
+            daily_routes.append(day_route)
 
         plan_totals = self._summarize_plan(daily_routes)
         plan_score = self._plan_score(daily_routes)
@@ -107,6 +116,8 @@ class ItineraryOptimizer:
     def _rank_areas(self, profile: PlanProfile, user_request: Dict[str, Any], weather: Dict[str, Any] | None) -> List[str]:
         grouped = defaultdict(list)
         for poi in self.pois:
+            if str(poi.get("poi_name")) in getattr(self, "_active_removed_pois", set()):
+                continue
             grouped[str(poi.get("nearby_area") or "未分组")].append(poi)
 
         area_scores = []
@@ -144,12 +155,12 @@ class ItineraryOptimizer:
         candidates = []
         for poi in self.pois:
             name = str(poi.get("poi_name"))
-            if name in used_poi_names:
+            if name in used_poi_names or name in getattr(self, "_active_removed_pois", set()):
                 continue
             if candidate_areas and poi.get("nearby_area") not in candidate_areas:
                 continue
 
-            s = score_poi(poi, user_request, profile, main_area=main_area, weather=weather)
+            s = score_poi(poi, user_request, profile, main_area=main_area, weather=weather) + self._budget_score(poi, user_request) + self._state_score(poi, user_request)
             item = dict(poi)
             item["score"] = s
             candidates.append(item)
@@ -170,9 +181,9 @@ class ItineraryOptimizer:
         candidates = []
         for poi in self.pois:
             name = str(poi.get("poi_name"))
-            if name in used_poi_names or name in current_names:
+            if name in used_poi_names or name in current_names or name in getattr(self, "_active_removed_pois", set()):
                 continue
-            s = score_poi(poi, user_request, profile, weather=weather)
+            s = score_poi(poi, user_request, profile, weather=weather) + self._budget_score(poi, user_request) + self._state_score(poi, user_request)
             item = dict(poi)
             item["score"] = s
             candidates.append(item)
@@ -287,7 +298,8 @@ class ItineraryOptimizer:
 
             route_items.append({
                 "sort_order": idx + 1,
-                "poi_id": poi.get("id"),
+                "item_type": "attraction",
+                "poi_id": poi.get("id") or poi.get("poi_id"),
                 "poi_name": poi.get("poi_name"),
                 "poi_type": poi.get("poi_type"),
                 "nearby_area": poi.get("nearby_area"),
@@ -319,6 +331,63 @@ class ItineraryOptimizer:
             "transport_time_minutes": total_transport_time,
             "items": route_items,
         }
+
+    @staticmethod
+    def _budget_score(poi: Dict[str, Any], user_request: Dict[str, Any]) -> float:
+        budget_plan = user_request.get("budget_plan") or {}
+        warning = budget_plan.get("budget_warning")
+        level = str(poi.get("price_level") or "unknown")
+        if warning == "budget_tight":
+            return 10 if level in {"free", "low"} else -12 if level == "high" else 0
+        if warning == "budget_flexible":
+            return 4 if level in {"medium", "high"} else 0
+        return 0
+
+    @staticmethod
+    def _state_score(poi: Dict[str, Any], user_request: Dict[str, Any]) -> float:
+        score = 0.0
+        if str(poi.get("poi_name")) in set(user_request.get("confirmed_pois") or []):
+            score += 25
+        if user_request.get("weather_mode") == "rainy":
+            indoor = str(poi.get("indoor_outdoor") or "")
+            ptype = str(poi.get("poi_type") or "")
+            if indoor in {"indoor", "mixed"} or any(x in ptype for x in ["博物馆", "商圈", "餐饮"]):
+                score += 14
+            if indoor == "outdoor":
+                score -= 18
+        if user_request.get("walking_tolerance") == "low" and poi.get("nearby_area") == user_request.get("hotel_area_name"):
+            score += 8
+        return score
+
+    @staticmethod
+    def _compress_day_route(day_route: Dict[str, Any]) -> Dict[str, Any]:
+        items = sorted(day_route.get("items", []), key=lambda x: x.get("score", 0), reverse=True)[:3]
+        items = sorted(items, key=lambda x: x.get("sort_order", 0))
+        for idx, item in enumerate(items, 1):
+            item["sort_order"] = idx
+        day_route["items"] = items
+        day_route["title"] = day_route.get("title", "") + "（半日压缩）"
+        day_route["summary"] = "已压缩为 4-5 小时半日路线，保留最高价值点并减少跨区移动。"
+        day_route["estimated_cost_low"] = sum(int(i.get("estimated_cost_low") or 0) for i in items)
+        day_route["estimated_cost_high"] = sum(int(i.get("estimated_cost_high") or 0) for i in items)
+        day_route["walking_distance_km"] = round(float(day_route.get("walking_distance_km") or 0) * 0.55, 2)
+        day_route["transport_time_minutes"] = int(float(day_route.get("transport_time_minutes") or 0) * 0.55)
+        return day_route
+
+    @staticmethod
+    def _apply_current_location(day_route: Dict[str, Any], location: Dict[str, Any]) -> Dict[str, Any]:
+        lon = location.get("longitude")
+        lat = location.get("latitude")
+        if lon is None or lat is None:
+            return day_route
+        start = {"longitude": lon, "latitude": lat}
+        items = list(day_route.get("items") or [])
+        items.sort(key=lambda x: poi_distance_km(start, x) if x.get("longitude") and x.get("latitude") else 999)
+        for idx, item in enumerate(items, 1):
+            item["sort_order"] = idx
+        day_route["items"] = items
+        day_route["summary"] = "已基于当前位置重新排序当天剩余路线，优先安排附近仍适合执行的点位。"
+        return day_route
 
     @staticmethod
     def _suggest_transport(distance_km: float, transport_preference: str) -> str:

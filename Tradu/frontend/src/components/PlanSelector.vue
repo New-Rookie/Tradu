@@ -16,14 +16,14 @@
 </template>
 
 <script setup lang="ts">
-import type { ItineraryPlan } from "../stores/itineraryStore";
+import type { ItineraryPlan } from "../api/types";
 
 const props = defineProps<{
   plans: ItineraryPlan[];
   modelValue: number;
 }>();
 
-def formatNumber(value?: number) {
+function formatNumber(value?: number) {
   if (value === undefined || value === null) return "--";
   return Number(value).toFixed(1);
 }

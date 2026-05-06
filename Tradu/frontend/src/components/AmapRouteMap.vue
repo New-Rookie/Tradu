@@ -6,10 +6,11 @@
       <div class="panel-meta">
         {{ day.items?.length || 0 }} 个点位 · 步行约 {{ day.walking_distance_km || 0 }} km · 交通约 {{ day.transport_time_minutes || 0 }} 分钟
       </div>
+      <div class="legend"><span>景点</span><span>餐饮</span><span>住宿区域</span><span>休息</span></div>
       <ol class="poi-list">
         <li v-for="item in day.items" :key="itemKey(item)">
           <strong>{{ item.poi_name }}</strong>
-          <span>{{ item.poi_type || 'POI' }}</span>
+          <span>{{ item.item_type === "meal" ? "餐饮" : item.poi_type || 'POI' }}</span>
         </li>
       </ol>
     </div>
@@ -20,9 +21,11 @@
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import AMapLoader from "@amap/amap-jsapi-loader";
 import type { DailyRoute, RouteItem } from "../stores/itineraryStore";
+import type { HotelAreaRecommendation } from "../api/types";
 
 const props = defineProps<{
   day: DailyRoute | null;
+  hotelArea?: HotelAreaRecommendation | null;
 }>();
 
 const mapRef = ref<HTMLDivElement | null>(null);
@@ -79,6 +82,21 @@ function clearOverlays() {
   overlays = [];
 }
 
+function markerContent(item: RouteItem, index: number) {
+  const color = item.item_type === "meal" ? "#f79009" : item.item_type === "rest" ? "#12b76a" : "#315efb";
+  return `<div style="background:${color};color:white;border-radius:999px;padding:5px 8px;font-weight:800;border:2px solid white;box-shadow:0 6px 16px rgba(0,0,0,.2)">${index}</div>`;
+}
+
+function hotelAreaMarker() {
+  if (!map || !AMapInstance || !props.hotelArea?.longitude || !props.hotelArea?.latitude) return null;
+  return new AMapInstance.Marker({
+    position: [props.hotelArea.longitude, props.hotelArea.latitude],
+    title: props.hotelArea.area_name,
+    content: `<div style="background:#7a5af8;color:white;border-radius:8px;padding:6px 8px;font-weight:800;border:2px solid white">住</div>`,
+    offset: new AMapInstance.Pixel(-13, -30),
+  });
+}
+
 function drawRoute() {
   if (!map || !AMapInstance) return;
   clearOverlays();
@@ -90,10 +108,8 @@ function drawRoute() {
     const marker = new AMapInstance.Marker({
       position: [item.longitude, item.latitude],
       title: item.poi_name,
-      label: {
-        content: `${index + 1}. ${item.poi_name}`,
-        direction: "top",
-      },
+      content: markerContent(item, index + 1),
+      offset: new AMapInstance.Pixel(-13, -30),
     });
 
     marker.on("click", () => {
@@ -101,10 +117,13 @@ function drawRoute() {
         content: `
           <div style="padding:8px 10px;line-height:1.6;min-width:180px">
             <div style="font-weight:700;margin-bottom:4px">${index + 1}. ${item.poi_name}</div>
-            <div>类型：${item.poi_type || "-"}</div>
+            <div>类型：${item.item_type === "meal" ? "餐饮" : item.poi_type || "-"}</div>
             <div>片区：${item.nearby_area || "-"}</div>
             <div>停留：${item.suggested_duration_minutes || 0} 分钟</div>
+            <div>预算：${item.estimated_cost_low || 0}-${item.estimated_cost_high || 0}</div>
+            <div>理由：${item.reason || "-"}</div>
             <div>提示：${item.tips || "暂无"}</div>
+            <div>下一站：${item.transport_to_next || "-"}</div>
           </div>
         `,
       });
@@ -123,7 +142,8 @@ function drawRoute() {
     lineCap: "round",
   });
 
-  overlays = [...markers, polyline];
+  const hotelMarker = hotelAreaMarker();
+  overlays = hotelMarker ? [...markers, hotelMarker, polyline] : [...markers, polyline];
   map.add(overlays);
   map.setFitView(overlays, false, [80, 80, 80, 80]);
 }
@@ -133,7 +153,7 @@ onMounted(async () => {
 });
 
 watch(
-  () => props.day,
+  () => [props.day, props.hotelArea],
   () => drawRoute(),
   { deep: true }
 );
@@ -204,4 +224,9 @@ onBeforeUnmount(() => {
   color: #667085;
   font-size: 12px;
 }
+</style>
+
+<style scoped>
+.legend { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.legend span { border-radius: 999px; background: #eef3ff; color: #315efb; padding: 4px 8px; font-size: 12px; }
 </style>

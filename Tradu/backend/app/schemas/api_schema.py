@@ -31,6 +31,11 @@ class ItineraryGenerateRequest(BaseModel):
     walking_tolerance: str = "medium"
     transport_preference: str = "public_transport"
     imported_pois: List[str] = []
+    session_id: Optional[str] = None
+    need_meal_planning: bool = True
+    need_hotel_area: bool = True
+    budget_control_level: str = "normal"
+    budget_control: str = "normal"
 
 
 class PoiItem(BaseModel):
@@ -80,3 +85,38 @@ class ItineraryGenerateResponse(BaseModel):
 
 class LLMJsonResponse(BaseModel):
     raw: Dict[str, Any]
+
+class SessionCreateRequest(BaseModel):
+    session_id: Optional[str] = None
+
+
+class ServicePoiRefreshRequest(BaseModel):
+    city: str = "重庆"
+    nearby_area: str
+    service_types: List[str] = ["restaurant", "hotel"]
+
+
+class ItineraryAdjustRequest(BaseModel):
+    session_id: str
+    instruction: str
+
+
+class SessionOnlyRequest(BaseModel):
+    session_id: str
+
+
+class RemovePoiRequest(BaseModel):
+    session_id: str
+    poi_name: str
+
+
+class CompressDayRequest(BaseModel):
+    session_id: str
+    day_index: int = Field(..., ge=1)
+
+
+class ContinueFromLocationRequest(BaseModel):
+    session_id: str
+    longitude: float
+    latitude: float
+    current_time: Optional[str] = None

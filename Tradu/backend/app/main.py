@@ -2,6 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.router import api_router
+from backend.app.db.base import Base
+from backend.app.db.session import engine
+from backend.app import models  # noqa: F401
 from backend.app.core.config import get_settings
 
 settings = get_settings()
@@ -19,6 +22,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+Base.metadata.create_all(bind=engine)
 
 app.include_router(api_router, prefix=settings.api_prefix)
 
