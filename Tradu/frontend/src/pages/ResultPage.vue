@@ -35,6 +35,40 @@
         />
       </section>
 
+      <section class="section-card v1-grid">
+        <div v-if="store.recommendedHotelArea" class="v1-card">
+          <h3>推荐住宿区域：{{ store.recommendedHotelArea.area_name }}</h3>
+          <p>{{ store.recommendedHotelArea.reason }}</p>
+          <div class="item-tags">
+            <span v-for="tip in store.recommendedHotelArea.risk_tips" :key="tip">{{ tip }}</span>
+          </div>
+        </div>
+        <div v-if="store.budgetPlan" class="v1-card budget-list">
+          <h3>预算约束估算</h3>
+          <span>总预算：{{ store.budgetPlan.total_budget }}</span>
+          <span>住宿：{{ store.budgetPlan.accommodation_budget }}</span>
+          <span>餐饮：{{ store.budgetPlan.food_budget }}</span>
+          <span>景点：{{ store.budgetPlan.attraction_budget }}</span>
+          <span>市内交通：{{ store.budgetPlan.transport_budget }}</span>
+          <span>机动：{{ store.budgetPlan.buffer_budget }}</span>
+          <strong>风险：{{ store.budgetPlan.budget_warning }}</strong>
+        </div>
+      </section>
+
+      <section v-if="currentPlan" class="section-card">
+        <div class="adjust-bar">
+          <button @click="reduceWalking">一键少走路</button>
+          <button @click="rainMode">雨天方案</button>
+          <button @click="compressToday">压缩当前天</button>
+          <button @click="continueFromLocation">从当前位置继续</button>
+        </div>
+        <div class="adjust-input">
+          <input v-model="instruction" placeholder="例如：我不想去洪崖洞，少走路一点，多安排美食" />
+          <button @click="submitAdjustment">调整路线</button>
+        </div>
+        <p v-if="lastExplanation" class="explain">{{ lastExplanation }}</p>
+      </section>
+
       <section v-if="currentPlan" class="section-card">
         <div class="plan-summary">
           <div>
@@ -85,7 +119,8 @@
               <div class="item-body">
                 <div class="item-title-row">
                   <strong>{{ item.poi_name }}</strong>
-                  <span>{{ item.poi_type }}</span>
+                  <span>{{ item.item_type === "meal" ? (item.meal_type === "lunch" ? "午餐" : "晚餐") : item.poi_type }}</span>
+                  <button v-if="item.item_type !== 'meal'" class="remove-btn" @click="removePoi(item.poi_name)">删除</button>
                 </div>
                 <p>{{ item.reason }}</p>
                 <div class="item-tags">
@@ -104,12 +139,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { RouterLink } from "vue-router";
 import PlanSelector from "../components/PlanSelector.vue";
 import { useItineraryStore, type RouteItem } from "../stores/itineraryStore";
+import { useSessionStore } from "../stores/sessionStore";
 
 const store = useItineraryStore();
+const sessionStore = useSessionStore();
+const instruction = ref("");
+const lastExplanation = ref("");
 const currentPlan = computed(() => store.currentPlan);
 
 function itemKey(item: RouteItem) {
@@ -118,6 +157,45 @@ function itemKey(item: RouteItem) {
 
 function selectDay(dayIndex: number) {
   store.selectDay(Math.max(0, dayIndex - 1));
+}
+
+async function withSession() {
+  return sessionStore.getSessionId() || await sessionStore.initSession();
+}
+
+async function submitAdjustment() {
+  if (!instruction.value.trim()) return;
+  const result = await store.adjustItinerary(await withSession(), instruction.value.trim());
+  lastExplanation.value = result.explanation;
+  instruction.value = "";
+}
+
+async function removePoi(name: string) {
+  const result = await store.removePoi(await withSession(), name);
+  lastExplanation.value = result.explanation;
+}
+
+async function reduceWalking() {
+  const result = await store.reduceWalking(await withSession());
+  lastExplanation.value = result.explanation;
+}
+
+async function rainMode() {
+  const result = await store.applyRainMode(await withSession());
+  lastExplanation.value = result.explanation;
+}
+
+async function compressToday() {
+  const result = await store.compressDay(await withSession(), store.selectedDayIndex + 1);
+  lastExplanation.value = result.explanation;
+}
+
+async function continueFromLocation() {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    const result = await store.continueFromLocation(await withSession(), pos.coords.longitude, pos.coords.latitude);
+    lastExplanation.value = result.explanation;
+  });
 }
 </script>
 
@@ -351,4 +429,16 @@ h1 {
   color: #475467;
   font-size: 13px;
 }
+</style>
+
+<style scoped>
+.v1-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.v1-card { border: 1px solid #e4e7ec; border-radius: 16px; padding: 16px; }
+.budget-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.budget-list h3 { grid-column: 1 / -1; }
+.adjust-bar, .adjust-input { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.adjust-bar button, .adjust-input button, .remove-btn { border: 0; border-radius: 999px; padding: 8px 12px; background: #eef4ff; color: #315efb; font-weight: 700; cursor: pointer; }
+.adjust-input input { flex: 1; min-width: 280px; border: 1px solid #d0d5dd; border-radius: 999px; padding: 10px 14px; }
+.explain { color: #315efb; font-weight: 700; }
+.remove-btn { margin-left: 8px; background: #fff1f3; color: #c01048; }
 </style>

@@ -44,6 +44,22 @@
             <option value="taxi">优先打车</option>
           </select>
         </label>
+        <label>
+          <span>预算控制</span>
+          <select v-model="form.budget_control_level">
+            <option value="normal">标准控制</option>
+            <option value="strict">严格省钱</option>
+            <option value="flexible">体验优先</option>
+          </select>
+        </label>
+        <label class="check-label">
+          <input v-model="form.need_hotel_area" type="checkbox" />
+          <span>推荐住宿区域</span>
+        </label>
+        <label class="check-label">
+          <input v-model="form.need_meal_planning" type="checkbox" />
+          <span>自动安排午晚餐</span>
+        </label>
       </div>
 
       <div class="tag-section">
@@ -91,11 +107,13 @@
 <script setup lang="ts">
 import { reactive, ref } from "vue";
 import { useRouter, RouterLink } from "vue-router";
-import { generateItinerary } from "../api/itinerary";
 import { useItineraryStore } from "../stores/itineraryStore";
+import type { ItineraryRequest } from "../api/types";
+import { useSessionStore } from "../stores/sessionStore";
 
 const router = useRouter();
 const store = useItineraryStore();
+const sessionStore = useSessionStore();
 const loading = ref(false);
 const error = ref("");
 
@@ -111,6 +129,9 @@ const form = reactive({
   travel_style: "relaxed",
   walking_tolerance: "medium",
   transport_preference: "public_transport",
+  need_hotel_area: true,
+  need_meal_planning: true,
+  budget_control_level: "normal",
 });
 
 function togglePreference(tag: string) {
@@ -129,12 +150,9 @@ async function submit() {
   loading.value = true;
   error.value = "";
   try {
-    const payload = { ...form };
-    const res = await generateItinerary(payload);
-    if (!res?.success) {
-      throw new Error(res?.message || "生成失败");
-    }
-    store.setItinerary(res.data, payload);
+    const sessionId = await sessionStore.initSession();
+    const payload = { ...form, session_id: sessionId } as ItineraryRequest;
+    await store.generateItinerary(payload);
     router.push("/result");
   } catch (err: any) {
     error.value = err?.message || "生成失败，请检查后端是否启动。";
@@ -273,4 +291,17 @@ select {
   margin-top: 16px;
   color: #d92d20;
 }
+</style>
+
+<style scoped>
+.check-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #d0d5dd;
+  border-radius: 12px;
+  padding: 11px 12px;
+}
+.check-label input { width: auto; }
+.check-label span { margin: 0; }
 </style>

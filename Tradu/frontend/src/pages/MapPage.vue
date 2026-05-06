@@ -36,8 +36,16 @@
         />
       </section>
 
+      <section v-if="currentPlan" class="map-summary">
+        <span>当前方案：{{ currentPlan.title }}</span>
+        <span>当前天数：Day {{ (currentDay?.day_index) || 1 }}</span>
+        <span>预算：{{ currentDay?.estimated_cost_low || 0 }}-{{ currentDay?.estimated_cost_high || 0 }}</span>
+        <span>步行：{{ currentDay?.walking_distance_km || 0 }}km</span>
+        <span>交通：{{ currentDay?.transport_time_minutes || 0 }}分钟</span>
+      </section>
+
       <section class="map-card">
-        <AmapRouteMap :day="currentDay" />
+        <AmapRouteMap :day="currentDay" :hotel-area="store.recommendedHotelArea" />
       </section>
     </template>
   </main>
@@ -143,5 +151,23 @@ h1 {
 .map-card {
   margin-top: 18px;
   padding: 12px;
+}
+
+.map-summary {
+  margin-top: 18px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: #fff;
+  border: 1px solid #e4e7ec;
+  border-radius: 16px;
+  padding: 14px;
+}
+
+.map-summary span {
+  background: #f2f4f7;
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #475467;
 }
 </style>
