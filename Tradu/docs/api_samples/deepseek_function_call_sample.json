@@ -1,0 +1,9 @@
+[
+  {
+    "function_name": "search_poi",
+    "arguments": {
+      "city": "重庆",
+      "keyword": "洪崖洞"
+    }
+  }
+]

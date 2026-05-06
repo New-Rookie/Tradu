@@ -1,0 +1,15 @@
+{
+  "destination": "重庆",
+  "days": 3,
+  "budget": 2500,
+  "preferences": [
+    "美食",
+    "拍照"
+  ],
+  "avoid": [
+    "高强度路线"
+  ],
+  "travel_style": "relaxed",
+  "walking_tolerance": "medium",
+  "transport_preference": "public_transport"
+}
